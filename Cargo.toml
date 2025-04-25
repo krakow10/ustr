@@ -21,6 +21,9 @@ parking_lot = "0.12"
 serde = { version = "1", optional = true }
 ahash = { version = "0.8.3", default-features = false }
 
+[features]
+default = ["global"]
+global = []
 
 [dev-dependencies]
 criterion = "0.4"

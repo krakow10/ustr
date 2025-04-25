@@ -32,7 +32,7 @@ use super::bumpalloc::LeakyBumpAlloc;
 pub(crate) struct StringCache {
     pub(crate) alloc: LeakyBumpAlloc,
     pub(crate) old_allocs: Vec<LeakyBumpAlloc>,
-    entries: Vec<*mut StringCacheEntry>,
+    entries: Vec<*mut StringCacheEntryHeader>,
     num_entries: usize,
     mask: usize,
     total_allocated: usize,
@@ -60,7 +60,7 @@ impl StringCache {
         let capacity = INITIAL_CAPACITY / NUM_BINS;
         let alloc = LeakyBumpAlloc::new(
             INITIAL_ALLOC / NUM_BINS,
-            std::mem::align_of::<StringCacheEntry>(),
+            std::mem::align_of::<StringCacheEntryHeader>(),
         );
         StringCache {
             // Current allocator.
@@ -174,7 +174,7 @@ impl StringCache {
         // we'll be using 128-bit pointers and we'll need to rewrite this
         // crate anyway.
         let byte_len = string.len() + 1;
-        let alloc_size = std::mem::size_of::<StringCacheEntry>() + byte_len;
+        let alloc_size = std::mem::size_of::<StringCacheEntryHeader>() + byte_len;
 
         // if our new allocation would spill over the allocator, make a new
         // allocator and let the old one leak
@@ -193,7 +193,7 @@ impl StringCache {
                 &mut self.alloc,
                 LeakyBumpAlloc::new(
                     new_capacity,
-                    std::mem::align_of::<StringCacheEntry>(),
+                    std::mem::align_of::<StringCacheEntryHeader>(),
                 ),
             );
             self.old_allocs.push(old_alloc);
@@ -208,14 +208,14 @@ impl StringCache {
         //    returned by allocate() is prooperly aligned.
         unsafe {
             *entry_ptr =
-                self.alloc.allocate(alloc_size) as *mut StringCacheEntry;
+                self.alloc.allocate(alloc_size) as *mut StringCacheEntryHeader;
 
             // Write the header.
             // `entry_ptr` is guaranteed to point to a valid `StringCacheEntry`,
             // or `alloc.allocate()` would have aborted.
             std::ptr::write(
                 *entry_ptr,
-                StringCacheEntry {
+                StringCacheEntryHeader {
                     hash,
                     len: string.len(),
                 },
@@ -251,7 +251,7 @@ impl StringCache {
     pub(crate) unsafe fn grow(&mut self) {
         let new_mask = self.mask * 2 + 1;
 
-        let mut new_entries: std::vec::Vec<*mut StringCacheEntry> =
+        let mut new_entries: std::vec::Vec<*mut StringCacheEntryHeader> =
             vec![std::ptr::null_mut(); new_mask + 1];
 
         // copy the existing map into the new map
@@ -303,7 +303,7 @@ impl StringCache {
         self.alloc.clear();
         self.alloc = LeakyBumpAlloc::new(
             INITIAL_ALLOC / NUM_BINS,
-            std::mem::align_of::<StringCacheEntry>(),
+            std::mem::align_of::<StringCacheEntryHeader>(),
         );
     }
 
@@ -368,7 +368,7 @@ impl Iterator for StringCacheIterator {
         // Cast the current ptr to a `StringCacheEntry` and create the next
         // string from it.
         unsafe {
-            let sce = &*(self.current_ptr as *const StringCacheEntry);
+            let sce = &*(self.current_ptr as *const StringCacheEntryHeader);
             // The next entry will be the size of the number of bytes in the
             // string, +1 for the null byte, rounded up to the alignment (8).
             self.current_ptr = sce.next_entry();
@@ -384,10 +384,14 @@ impl Iterator for StringCacheIterator {
 }
 
 #[repr(C)]
-#[derive(Clone)]
-pub(crate) struct StringCacheEntry {
+pub(crate) struct StringCacheEntryHeader {
     pub(crate) hash: u64,
     pub(crate) len: usize,
+}
+
+pub(crate) struct StringCacheEntry {
+	pub(crate) header: StringCacheEntryHeader,
+	pub(crate) ustr: str,
 }
 
 impl StringCacheEntry {
@@ -395,7 +399,7 @@ impl StringCacheEntry {
     pub(crate) fn char_ptr(&self) -> *const u8 {
         // We know the chars are always directly after this struct in memory
         // because that's the way they're laid out on initialization.
-        unsafe { (self as *const StringCacheEntry).add(1) as *const u8 }
+        self.ustr.as_ptr()
     }
 
     // Calcualte the address of the next entry in the cache. This is a utility
@@ -403,8 +407,8 @@ impl StringCacheEntry {
     pub(crate) unsafe fn next_entry(&self) -> *const u8 {
         #[allow(clippy::ptr_offset_with_cast)]
         self.char_ptr().add(round_up_to(
-            self.len + 1,
-            std::mem::align_of::<StringCacheEntry>(),
+            self.header.len + 1,
+            std::mem::align_of::<StringCacheEntryHeader>(),
         ))
     }
 }

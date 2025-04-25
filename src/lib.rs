@@ -233,6 +233,7 @@ impl Ustr {
     /// assert_eq!(u1, u2);
     /// assert_eq!(ustr::num_entries(), 1);
     /// ```
+    // #[cfg(feature = "global")]
     pub fn from(string: &str) -> Ustr {
         let hash = {
             let mut hasher = ahash::AHasher::default();
@@ -336,10 +337,10 @@ impl Ustr {
 
     /// Get a raw pointer to the `StringCacheEntry`.
     #[inline]
-    fn as_string_cache_entry(&self) -> &StringCacheEntry {
+    fn as_string_cache_entry(&self) -> &StringCacheEntryHeader {
         // The allocator guarantees that the alignment is correct and that
         // this pointer is non-null
-        unsafe { &*(self.char_ptr.as_ptr().cast::<StringCacheEntry>().sub(1)) }
+        unsafe { &*(self.char_ptr.as_ptr().cast::<StringCacheEntryHeader>().sub(1)) }
     }
 
     /// Get the length (in bytes) of this string.
@@ -1140,33 +1141,7 @@ mod tests {
 }
 
 lazy_static::lazy_static! {
-    static ref STRING_CACHE: Bins = {
-        use std::mem::{self, MaybeUninit};
-        // This deeply unsafe feeling dance allows us to initialize an array of
-        // arbitrary size and will have to tide us over until const generics
-        // land. See:
-        // https://doc.rust-lang.org/beta/std/mem/union.MaybeUninit.html#initializing-an-array-element-by-element
-
-        // Create an uninitialized array of `MaybeUninit`. The `assume_init` is
-        // safe because the type we are claiming to have initialized here is a
-        // bunch of `MaybeUninit`s, which do not require initialization.
-        let mut bins: [MaybeUninit<Mutex<StringCache>>; NUM_BINS] = unsafe {
-            MaybeUninit::uninit().assume_init()
-        };
-
-        // Dropping a `MaybeUninit` does nothing. Thus using raw pointer
-        // assignment instead of `ptr::write` does not cause the old
-        // uninitialized value to be dropped. Also if there is a panic during
-        // this loop, we have a memory leak, but there is no memory safety
-        // issue.
-        for bin in &mut bins[..] {
-            *bin = MaybeUninit::new(Mutex::new(StringCache::default()));
-        }
-
-        // Everything is initialized. Transmute the array to the
-        // initialized type.
-        unsafe { mem::transmute::<_, Bins>(bins) }
-    };
+    static ref STRING_CACHE: Bins = Bins(core::array::from_fn(|_|Mutex::new(StringCache::default())));
 }
 
 // Use the top bits of the hash to choose a bin
