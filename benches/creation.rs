@@ -8,7 +8,7 @@ use std::sync::Arc;
 use string_cache::DefaultAtom;
 use string_interner::StringInterner;
 
-use ustr::*;
+use ustr::ustr;
 
 use parking_lot::Mutex;
 
@@ -38,6 +38,29 @@ fn criterion_benchmark(c: &mut Criterion) {
             unsafe { ustr::_clear_cache() };
             for s in s.iter().cycle().take(100_000) {
                 black_box(ustr(s));
+            }
+        });
+    });
+
+    let hash_str_cache = hash_str::get_cache();
+
+    let s = raft.clone();
+    c.bench_function("single raft hash_str global", move |b| {
+        b.iter(|| {
+            unsafe { hash_str::_clear_cache() };
+            for s in s.iter().cycle().take(100_000) {
+                black_box(hash_str_cache.intern(s));
+            }
+        });
+    });
+
+    let s = raft.clone();
+    c.bench_function("single raft hash_str local", move |b| {
+        b.iter(|| {
+            let host = hash_str::HashStrHost::new();
+            let mut cache = hash_str::HashStrCache::new();
+            for s in s.iter().cycle().take(100_000) {
+                black_box(cache.intern_with(&host, s));
             }
         });
     });
