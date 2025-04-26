@@ -67,6 +67,20 @@ fn criterion_benchmark(c: &mut Criterion) {
     });
 
     let s = raft.clone();
+    let precomputed_anonymous: Vec<&'static HashStr> = s
+        .iter()
+        .map(|s| Box::leak(HashStr::anonymous(s.clone())) as &'static HashStr)
+        .collect();
+    c.bench_function("single raft hash_str global precomputed", move |b| {
+        b.iter(|| {
+            unsafe { hash_str::_clear_cache() };
+            for s in precomputed_anonymous.iter().cycle().take(100_000) {
+                black_box(hash_str_cache.intern(s));
+            }
+        });
+    });
+
+    let s = raft.clone();
     let precomputed_host = hash_str::HashStrHost::new();
     let mut precomputed_cache = hash_str::HashStrCache::new();
     let precomputed: Vec<_> = s
