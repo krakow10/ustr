@@ -160,6 +160,46 @@ fn criterion_benchmark(c: &mut Criterion) {
 
         let s = Arc::clone(&raft);
         c.bench_function(
+            &format!("raft hash_str x {} threads", num_threads),
+            move |b| {
+                let (tx1, rx1) = bounded(0);
+                let (tx2, rx2) = bounded(0);
+                let s = Arc::clone(&s);
+                scope(|scope| {
+                    for tt in 0..num_threads {
+                        let t = tt;
+                        let rx1 = rx1.clone();
+                        let tx2 = tx2.clone();
+                        let s = Arc::clone(&s);
+                        scope.spawn(move |_| {
+                            while rx1.recv().is_ok() {
+                                for s in s.iter().cycle().skip(t * 17).take(num)
+                                {
+                                    black_box(hash_str_cache.intern_str(s));
+                                }
+                                tx2.send(()).unwrap();
+                            }
+                        });
+                    }
+
+                    b.iter(|| {
+                        unsafe { hash_str::_clear_cache() };
+                        for _ in 0..num_threads {
+                            tx1.send(()).unwrap();
+                        }
+
+                        for _ in 0..num_threads {
+                            rx2.recv().unwrap();
+                        }
+                    });
+                    drop(tx1);
+                })
+                .unwrap();
+            },
+        );
+
+        let s = Arc::clone(&raft);
+        c.bench_function(
             &format!("raft string-interner x {} threads", num_threads),
             move |b| {
                 let (tx1, rx1) = bounded::<
@@ -301,7 +341,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     );
 
     let s = raft_large.clone();
-    c.bench_function("raft large x1", move |b| {
+    c.bench_function("raft large ustr x1", move |b| {
         b.iter(|| {
             unsafe { ustr::_clear_cache() };
             for s in s.iter().cycle().take(100_000) {
@@ -310,9 +350,19 @@ fn criterion_benchmark(c: &mut Criterion) {
         });
     });
 
+    let s = raft_large.clone();
+    c.bench_function("raft large hash_str x1", move |b| {
+        b.iter(|| {
+            unsafe { hash_str::_clear_cache() };
+            for s in s.iter().cycle().take(100_000) {
+                black_box(hash_str_cache.intern_str(s));
+            }
+        });
+    });
+
     let num_threads = 6;
     let s = raft_large.clone();
-    c.bench_function("raft large x6", move |b| {
+    c.bench_function("raft large ustr x6", move |b| {
         let (tx1, rx1) = bounded(0);
         let (tx2, rx2) = bounded(0);
         let s = Arc::clone(&s);
@@ -334,6 +384,42 @@ fn criterion_benchmark(c: &mut Criterion) {
 
             b.iter(|| {
                 unsafe { ustr::_clear_cache() };
+                for _ in 0..num_threads {
+                    tx1.send(()).unwrap();
+                }
+
+                for _ in 0..num_threads {
+                    rx2.recv().unwrap();
+                }
+            });
+            drop(tx1);
+        })
+        .unwrap();
+    });
+
+    let s = raft_large.clone();
+    c.bench_function("raft large hash_str x6", move |b| {
+        let (tx1, rx1) = bounded(0);
+        let (tx2, rx2) = bounded(0);
+        let s = Arc::clone(&s);
+        scope(|scope| {
+            for tt in 0..num_threads {
+                let t = tt;
+                let rx1 = rx1.clone();
+                let tx2 = tx2.clone();
+                let s = Arc::clone(&s);
+                scope.spawn(move |_| {
+                    while rx1.recv().is_ok() {
+                        for s in s.iter().cycle().skip(t * 17).take(num) {
+                            black_box(hash_str_cache.intern_str(s));
+                        }
+                        tx2.send(()).unwrap();
+                    }
+                });
+            }
+
+            b.iter(|| {
+                unsafe { hash_str::_clear_cache() };
                 for _ in 0..num_threads {
                     tx1.send(()).unwrap();
                 }
